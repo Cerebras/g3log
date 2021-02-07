@@ -25,6 +25,7 @@
 #include <string>
 #include <algorithm>
 #include <map>
+#include <vector>
 #include <atomic>
 #include <g3log/atomicbool.hpp>
 
@@ -87,6 +88,7 @@ namespace g3 {
    static const int kWarningValue = 500;
    static const int kFatalValue = 1000;
    static const int kInternalFatalValue = 2000;
+   static const int kMaxValue = 10000;
 } // g3
 
 
@@ -135,6 +137,14 @@ namespace g3 {
       /// helper function to tell the logger if a log message was fatal. If it is it will force
       /// a shutdown after all log entries are saved to the sinks
       bool wasFatal(const LEVELS& level);
+
+#ifdef G3_DYNAMIC_LOGGING
+      class LoggingLevelContainer: public std::vector<LoggingLevel *> {
+      public:
+         LoggingLevelContainer(const std::map<int, LoggingLevel>& init_map);
+         ~LoggingLevelContainer();
+      };
+#endif
    }
 
 #ifdef G3_DYNAMIC_LOGGING
@@ -186,7 +196,7 @@ namespace g3 {
 
 #endif
    /// Enabled status for the given logging level
-   bool logLevel(LEVELS level);
+   bool logLevel(const LEVELS& level);
 
 } // g3
 

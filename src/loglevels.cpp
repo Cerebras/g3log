@@ -10,6 +10,7 @@
 #include <cassert>
 
 #include <iostream>
+#include <sstream>
 
 namespace g3 {
    namespace internal {
@@ -25,7 +26,24 @@ namespace g3 {
          {FATAL.value, {FATAL}}
       };
 
-      std::map<int, g3::LoggingLevel> g_log_levels = g_log_level_defaults;
+      LoggingLevelContainer g_log_levels = g_log_level_defaults;
+
+      LoggingLevelContainer::LoggingLevelContainer(const std::map<int, LoggingLevel>& init_map) :
+         std::vector<LoggingLevel *>(kMaxValue, nullptr) 
+      {
+         for (auto& v : init_map) {
+            (*this)[v.first] = new LoggingLevel(v.second);
+         }
+      }
+
+      LoggingLevelContainer::~LoggingLevelContainer() {
+         for (auto& v : (*this)) {
+            if (v != nullptr) {
+               delete v;
+               v = nullptr;
+            }
+         }
+      }
 #endif
    } // internal
 
@@ -34,7 +52,18 @@ namespace g3 {
 
       void addLogLevel(LEVELS lvl, bool enabled) {
          int value = lvl.value;
-         internal::g_log_levels[value] = {lvl, enabled};
+         if (value > kMaxValue) {
+            std::ostringstream error;
+            error << "The specified log level " << value << " is larger than the max allowed " << kMaxValue << ".\n";
+            error << "The max value " << kMaxValue << " will be used.";
+            std::cerr << error.str() << std::endl;
+            lvl.value = kMaxValue;
+            value = kMaxValue;
+         }
+         if (internal::g_log_levels[value] == nullptr) {
+            internal::g_log_levels[value] = new LoggingLevel();
+         }
+         (*internal::g_log_levels[value]) = {lvl, enabled};
       }
 
 
@@ -51,24 +80,24 @@ namespace g3 {
    namespace log_levels {
 
       void setHighest(LEVELS enabledFrom) {
-         auto it = internal::g_log_levels.find(enabledFrom.value);
-         if (it != internal::g_log_levels.end()) {
-            for (auto& v : internal::g_log_levels) {
-               if (v.first < enabledFrom.value) {
-                  disable(v.second.level);
-               } else {
-                  enable(v.second.level);
+         if (internal::g_log_levels[enabledFrom.value] != nullptr) {
+            for (int i=0; i<enabledFrom.value; i++) {
+               if (internal::g_log_levels[i] != nullptr) {
+                  disable(internal::g_log_levels[i]->level);
                }
-
+            }
+            for (int i=enabledFrom.value; i<kMaxValue; i++) {
+               if (internal::g_log_levels[i] != nullptr) {
+                  enable(internal::g_log_levels[i]->level);
+               }
             }
          }
       }
 
 
       void set(LEVELS level, bool enabled) {
-         auto it = internal::g_log_levels.find(level.value);
-         if (it != internal::g_log_levels.end()) {
-            internal::g_log_levels[level.value] = {level, enabled};
+         if (internal::g_log_levels[level.value] != nullptr) {
+            (*internal::g_log_levels[level.value]) = {level, enabled};
          }
       }
 
@@ -83,14 +112,18 @@ namespace g3 {
 
 
       void disableAll() {
-         for (auto& v : internal::g_log_levels) {
-            v.second.status = false;
+         for (auto& p : internal::g_log_levels) {
+            if (p != nullptr) {
+               p->status = false;
+            }
          }
       }
 
       void enableAll() {
-         for (auto& v : internal::g_log_levels) {
-            v.second.status = true;
+         for (auto& p : internal::g_log_levels) {
+            if (p != nullptr) {
+               p->status = true;
+            }
          }
       }
 
@@ -104,22 +137,28 @@ namespace g3 {
       }
 
       std::string to_string() {
-         return to_string(internal::g_log_levels);
+         return to_string(getAll());
       }
 
 
       std::map<int, g3::LoggingLevel> getAll() {
-         return internal::g_log_levels;
+         std::map<int, g3::LoggingLevel> ret;
+         for (const auto& p : internal::g_log_levels) {
+            if (p != nullptr) {
+               ret[p->level.value] = *p;
+            }
+         }
+         return ret;
       }
 
       // status : {Absent, Enabled, Disabled};
       status getStatus(LEVELS level) {
-         const auto it = internal::g_log_levels.find(level.value);
-         if (internal::g_log_levels.end() == it) {
+         const auto p = internal::g_log_levels[level.value];
+         if (p == nullptr) {
             return status::Absent;
          }
 
-         return (it->second.status.get().load() ? status::Enabled : status::Disabled);
+         return (p->status.get().load() ? status::Enabled : status::Disabled);
 
       }
    } // log_levels
@@ -127,11 +166,15 @@ namespace g3 {
 #endif
 
 
-   bool logLevel(LEVELS log_level) {
+   bool logLevel(const LEVELS& log_level) {
 #ifdef G3_DYNAMIC_LOGGING
       int level = log_level.value;
-      bool status = internal::g_log_levels[level].status.value();
-      return status;
+      if ((level > kMaxValue) || (internal::g_log_levels[level] == nullptr)) {
+         return false;
+      }
+      else {
+         return internal::g_log_levels[level]->status.value();
+      }
 #endif
       return true;
    }
